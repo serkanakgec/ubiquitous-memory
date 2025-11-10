@@ -1,0 +1,75 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                String     @id @default(uuid())
+  email             String     @unique
+  password_hash     String
+  full_name         String?
+  created_at        DateTime   @default(now())
+  is_email_verified Boolean    @default(false)
+  wallet_address    String     @unique @default(uuid())
+  metadata          Json?
+  balances          Balance[]
+  transfers_from    Transfer[] @relation("fromUser")
+  transfers_to      Transfer[] @relation("toUser")
+}
+
+model Token {
+  id           Int        @id @default(autoincrement())
+  symbol       String     @unique
+  name         String
+  decimals     Int
+  enabled      Boolean    @default(true)
+  price_source PriceSource @default(MANUAL)
+  manual_price Decimal?
+  updated_at   DateTime   @updatedAt
+  balances     Balance[]
+  transfers    Transfer[]
+}
+
+model Balance {
+  id       String  @id @default(uuid())
+  user_id  String
+  token_id Int
+  balance  Decimal @default(0)
+  reserved Decimal @default(0)
+  user     User    @relation(fields: [user_id], references: [id])
+  token    Token   @relation(fields: [token_id], references: [id])
+
+  @@unique([user_id, token_id])
+}
+
+model Transfer {
+  id           String         @id @default(uuid())
+  from_user_id String?
+  to_user_id   String?
+  token_id     Int
+  amount       Decimal
+  status       TransferStatus @default(PENDING)
+  created_at   DateTime       @default(now())
+  admin_note   String?
+  from_user    User?          @relation("fromUser", fields: [from_user_id], references: [id])
+  to_user      User?          @relation("toUser", fields: [to_user_id], references: [id])
+  token        Token          @relation(fields: [token_id], references: [id])
+}
+
+enum PriceSource {
+  API
+  MANUAL
+}
+
+enum TransferStatus {
+  COMPLETED
+  PENDING
+  REVERTED
+}
