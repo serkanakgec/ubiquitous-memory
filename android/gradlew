@@ -1,0 +1,224 @@
+#!/usr/bin/env sh
+
+#
+# Copyright 2015 the original author or authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+# Stop when one of the commands fails
+set -e
+
+# Turn on tracing for debugging this script
+# set -x
+
+# Add default JVM options here. You can also use JAVA_OPTS and GRADLE_OPTS to pass any JVM options to this script.
+DEFAULT_JVM_OPTS='"-Xmx64m" "-Xms64m"'
+
+APP_NAME="Gradle"
+APP_BASE_NAME=`basename "$0"`
+
+# Use the maximum available, or set MAX_FD != -1 to use that value.
+MAX_FD="maximum"
+
+warn () {
+    echo "$*"
+}
+
+die () {
+    echo
+    echo "$*"
+    echo
+    exit 1
+}
+
+# OS specific support (must be 'true' or 'false').
+cygwin=false
+msys=false
+darwin=false
+nonstop=false
+case "`uname`" in
+  CYGWIN* )
+    cygwin=true
+    ;;
+  Darwin* )
+    darwin=true
+    ;;
+  MINGW* )
+    msys=true
+    ;;
+  NONSTOP* )
+    nonstop=true
+    ;;
+esac
+
+CLASSPATH_SEPARATOR=":"
+if $cygwin || $msys; then
+    CLASSPATH_SEPARATOR=";"
+fi
+
+# Attempt to set APP_HOME
+# Resolve links: $0 may be a link
+PRG="$0"
+# Need this for relative symlinks.
+while [ -h "$PRG" ] ; do
+    ls=`ls -ld "$PRG"`
+    link=`expr "$ls" : '.*-> \(.*\)$'`
+    if expr "$link" : '/.*' > /dev/null; then
+        PRG="$link"
+    else
+        PRG=`dirname "$PRG"`"/$link"
+    fi
+done
+SAVED="`pwd`"
+cd "`dirname \"$PRG\"`/" >/dev/null
+APP_HOME="`pwd -P`"
+cd "$SAVED" >/dev/null
+
+# Add probing that discovers the folders in the distribution
+# This is a bit verbose, but it is rock solid
+if [ -f "$APP_HOME/lib/gradle-launcher.jar" ] ; then
+    # We are in a gradle distribution
+    GRADLE_HOME="$APP_HOME"
+else
+    # We are in a gradle-wrapper script and need to discover the distribution
+    if [ -z "$APP_HOME" ] ; then
+        die "APP_HOME must be set"
+    fi
+
+    # The wrapper is expected to be executed from the root of the project
+    # The wrapper's directory is a good starting point for discovery
+    # In a typical project, it will be APP_HOME=.
+    # In an old-style multi-project, it will be APP_HOME=parent
+    # The wrapper can be buried arbitrarily deep in the project tree
+    # Search the project tree, upwards
+    PROJECT_DIR="$APP_HOME"
+    while [ -z "$GRADLE_DISTRIBUTION_DIR" ] ; do
+        if [ -d "$PROJECT_DIR/gradle/wrapper" ] ; then
+            GRADLE_DISTRIBUTION_DIR="$PROJECT_DIR/gradle/wrapper"
+        else
+            if [ "$PROJECT_DIR" = "/" ] || [ "$PROJECT_DIR" = "." ] ; then
+                die "Could not locate a Gradle distribution installation."
+            fi
+            PROJECT_DIR=`dirname "$PROJECT_DIR"`
+        fi
+    done
+
+    . "$GRADLE_DISTRIBUTION_DIR/gradle-wrapper.properties"
+    if [ -z "$distributionUrl" ] ; then
+        die "Corrupted Gradle wrapper: distributionUrl is not set in $GRADLE_DISTRIBUTION_DIR/gradle-wrapper.properties"
+    fi
+
+    distributionUrl_escaped=$(echo "$distributionUrl" | sed 's/\//\\\//g')
+    distribution_name=$(echo "$distributionUrl" | sed 's/.*\/\(.*\)\.zip/\1/')
+
+    if [ -z "$distributionBase" ] ; then
+        distribution_base_name="GRADLE_USER_HOME"
+    else
+        distribution_base_name="PROJECT"
+    fi
+
+    if [ -z "$zipStoreBase" ] ; then
+        zip_store_base_name="GRADLE_USER_HOME"
+    else
+        zip_store_base_name="PROJECT"
+    fi
+
+    if [ "$distribution_base_name" = "GRADLE_USER_HOME" ] ; then
+        if [ -z "$GRADLE_USER_HOME" ] ; then
+            GRADLE_USER_HOME=~/.gradle
+        fi
+        if [ -z "$distributionPath" ] ; then
+            distribution_path_val="wrapper/dists"
+        else
+            distribution_path_val="$distributionPath"
+        fi
+        gradle_distribution_path="$GRADLE_USER_HOME/$distribution_path_val"
+    else
+        if [ -z "$distributionPath" ] ; then
+            distribution_path_val="gradle/wrapper/dists"
+        else
+            distribution_path_val="gradle/$distributionPath"
+        fi
+        gradle_distribution_path="$PROJECT_DIR/$distribution_path_val"
+    fi
+
+    if [ "$zip_store_base_name" = "GRADLE_USER_HOME" ] ; then
+        if [ -z "$GRADLE_USER_HOME" ] ; then
+            GRADLE_USER_HOME=~/.gradle
+        fi
+        if [ -z "$zipStorePath" ] ; then
+            zip_store_path_val="wrapper/dists"
+        else
+            zip_store_path_val="$zipStorePath"
+        fi
+        gradle_zip_store_path="$GRADLE_USER_HOME/$zip_store_path_val"
+    else
+        if [ -z "$zipStorePath" ] ; then
+            zip_store_path_val="gradle/wrapper/dists"
+        else
+            zip_store_path_val="gradle/$zipStorePath"
+        fi
+        gradle_zip_store_path="$PROJECT_DIR/$zip_store_path_val"
+    fi
+
+    distribution_file="$gradle_zip_store_path/$distribution_name.zip"
+    distribution_dir="$gradle_distribution_path/$distribution_name"
+    distribution_check_file="$distribution_dir/gradle-launcher.jar"
+
+    if [ ! -f "$distribution_check_file" ] ; then
+        # Check for alternative layout for windows hosts
+        hash=`echo "$distributionUrl" | md5sum`
+        hash=`echo "$hash" | cut -d ' ' -f 1`
+        distribution_check_file="$gradle_distribution_path/$hash/gradle-launcher.jar"
+        if [ -f "$distribution_check_file" ] ; then
+            distribution_dir="$gradle_distribution_path/$hash"
+        fi
+    fi
+
+    if [ ! -f "$distribution_check_file" ] ; then
+        # Distribution is not installed, download and unpack it
+        echo "Downloading $distributionUrl"
+        mkdir -p `dirname "$distribution_file"`
+        if [ -x "`which wget`" ] ; then
+            wget -O "$distribution_file" "$distributionUrl"
+        elif [ -x "`which curl`" ] ; then
+            curl -L -o "$distribution_file" "$distributionUrl"
+        else
+            die "Could not find wget or curl. Please install one of these and try again."
+        fi
+
+        TMP_DIR=$(mktemp -d)
+        echo "Unzipping $distribution_file to $TMP_DIR"
+        unzip -q -d "$TMP_DIR" "$distribution_file"
+        # Move contents of unzipped directory to the correct location
+        unzipped_dir=$(find "$TMP_DIR" -mindepth 1 -maxdepth 1 -type d)
+        if [ -d "$unzipped_dir" ]; then
+            rm -rf "$distribution_dir"/*
+            mv "$unzipped_dir"/* "$distribution_dir"
+            rm -rf "$TMP_DIR"
+        fi
+    fi
+
+    GRADLE_HOME="$distribution_dir"
+fi
+
+# Make sure Gradle is executable
+if [ ! -x "$GRADLE_HOME/bin/gradle" ] ; then
+    chmod +x "$GRADLE_HOME/bin/gradle"
+fi
+
+# Set the GRADLE_HOME so that the launched process can find it again
+export GRADLE_HOME
+
+exec "$GRADLE_HOME/bin/gradle" "$@"
