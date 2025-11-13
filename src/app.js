@@ -5,26 +5,57 @@ const bcrypt = require('bcrypt');
 const sqlite3 = require('sqlite3').verbose();
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
+const axios = require('axios');
 
 const app = express();
 const port = 3000;
 const DB_PATH = process.env.NODE_ENV === 'test' ? ':memory:' : (process.env.DB_PATH || './prod.db');
+const COINMARKETCAP_API_KEY = process.env.COINMARKETCAP_API_KEY;
 
 const db = new sqlite3.Database(DB_PATH, (err) => {
     if (err) { console.error("Error opening database", err.message); return; }
     console.log(`Connected to the database at ${DB_PATH}`);
+});
+
+db.on('open', () => {
     db.serialize(() => {
         db.run(`CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, full_name TEXT, wallet_address TEXT UNIQUE NOT NULL, is_admin INTEGER DEFAULT 0, created_at TEXT DEFAULT CURRENT_TIMESTAMP)`);
         db.run(`CREATE TABLE IF NOT EXISTS tokens (id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT UNIQUE NOT NULL, name TEXT NOT NULL, price REAL NOT NULL)`);
         db.run(`CREATE TABLE IF NOT EXISTS balances (user_id INTEGER NOT NULL, token_id INTEGER NOT NULL, amount REAL DEFAULT 0, PRIMARY KEY (user_id, token_id), FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE, FOREIGN KEY (token_id) REFERENCES tokens(id))`);
         db.run(`CREATE TABLE IF NOT EXISTS transfers (id INTEGER PRIMARY KEY AUTOINCREMENT, from_user_id INTEGER NOT NULL, to_user_id INTEGER NOT NULL, token_id INTEGER NOT NULL, amount REAL NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (from_user_id) REFERENCES users(id), FOREIGN KEY (to_user_id) REFERENCES users(id), FOREIGN KEY (token_id) REFERENCES tokens(id))`);
-
-        const tokens = [{ symbol: 'BTC', name: 'Bitcoin', price: 60000.00 }, { symbol: 'ETH', name: 'Ethereum', price: 3000.00 }];
-        const stmt = db.prepare("INSERT OR IGNORE INTO tokens (symbol, name, price) VALUES (?, ?, ?)");
-        tokens.forEach(t => stmt.run(t.symbol, t.name, t.price));
-        stmt.finalize();
     });
 });
+
+
+const updateTokenPrices = async () => {
+    if (!COINMARKETCAP_API_KEY) {
+        console.log('CoinMarketCap API key not found. Skipping price update.');
+        return;
+    }
+    try {
+        console.log('Fetching latest token prices from CoinMarketCap...');
+        const response = await axios.get('https://pro-api.coinmarketcap.com/v1/cryptocurrency/listings/latest', {
+            headers: { 'X-CMC_PRO_API_KEY': COINMARKETCAP_API_KEY },
+            params: { start: '1', limit: '20', convert: 'USD' }
+        });
+
+        const tokens = response.data.data;
+        const stmt = db.prepare("INSERT INTO tokens (symbol, name, price) VALUES (?, ?, ?) ON CONFLICT(symbol) DO UPDATE SET price=excluded.price");
+
+        db.serialize(() => {
+            tokens.forEach(token => {
+                const { symbol, name, quote } = token;
+                const price = quote.USD.price;
+                stmt.run(symbol, name, price);
+            });
+            stmt.finalize();
+            console.log('Token prices updated successfully.');
+        });
+    } catch (error) {
+        console.error('Error fetching or updating token prices:', error.response ? error.response.data : error.message);
+    }
+};
+
 
 app.use(bodyParser.json());
 
@@ -129,7 +160,9 @@ app.post('/api/admin/users/:id/topup', authMiddleware, adminMiddleware, (req, re
 module.exports = { app, db };
 
 if (require.main === module) {
-    app.listen(port, () => {
+    app.listen(port, async () => {
         console.log(`Server is running on http://localhost:${port}`);
+        await updateTokenPrices(); // Initial price fetch
+        setInterval(updateTokenPrices, 10 * 60 * 1000); // Update every 10 minutes
     });
 }
